@@ -1,0 +1,35 @@
+# ---- Keil MDK 编译产物 ----
+Objects/
+Listings/
+*.o
+*.crf
+*.d
+*.dep
+*.axf
+*.elf
+*.hex
+*.bin
+*.lnp
+*.sct
+*.lst
+*.map
+*.htm
+*.iex
+*.build_log.htm
+
+# ---- 本地构建/烧录日志 ----
+build_log.txt
+flash_log.txt
+
+# ---- 编辑器 / 系统 ----
+# 注意: .vscode/ 故意不忽略 —— 里面的 tasks.json 和 keil.ps1 是团队共用的
+# 编译/烧录任务，需要提交。只忽略 .vscode 下的个人化配置。
+.vscode/*.log
+.vscode/settings.json
+.idea/
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# ---- Claude Code 本地设置 ----
+.claude/settings.local.json
