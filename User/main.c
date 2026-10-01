@@ -22,7 +22,8 @@ int main(void)
 
 	while(1)
 	{
-		Parking_Show();			/*第1行模式,第2行阶段+发车状态,第3行光电+标志*/
+		Parking_Show();			/*第1行模式,第3行光电+标志*/
+		Serial_Show();			/*第2行串口收到的识别结果*/
 		Ultrasonic_Show();		/*第4行超声波距离*/
 		LineFollow_Show();		/*串口调试输出*/
 	}

@@ -12,7 +12,8 @@
 #define TURN_SPEED    300				//直角弯原地转向PWM占空比
 #define LOST_TIMEOUT  75				//单次丢线超时,75×20ms≈1.5s
 #define LOSS_DEBOUNCE 6					//丢线去抖:连续6×20ms=120ms才判定为真弯道
-#define TARGET_TURNS  3					//走完3个弯,第4个弯停车
+
+static volatile uint8_t TargetTurns = 3;	//停车弯数:第(TargetTurns+1)个弯停,直行模式=3,任务三按字母改
 
 /*定速PID参数*/
 static PID_t Left_Speed_PID = {
@@ -50,6 +51,7 @@ static float DifSpeed;
 
 /*状态量*/
 volatile uint8_t Track_Count,Stop_Count;		//Track_Count供Parking.c判断前方压线
+volatile uint8_t CornerEvent = 0;				//每确认一个直角弯置1,由任务模块消费后清零
 static volatile uint16_t LostCount = 0;			//本次连续丢线已持续的20ms周期数(看到线即清零)
 static volatile uint8_t Turn_Done = 0;			//本次丢线是否已计过弯,保证一个弯只计一次
 static volatile uint8_t Finished = 0;			//已走完目标弯数,永久停车
@@ -111,7 +113,8 @@ void LineFollow_Tick(void)
 			{
 				Turn_Done = 1;
 				Stop_Count++;
-				if(Stop_Count > TARGET_TURNS)	/*已走完3个弯,这是第4个*/
+				CornerEvent = 1;			/*通知任务模块:确认了一个直角弯*/
+				if(Stop_Count > TargetTurns)	/*到目标弯数:停车*/
 				{
 					Finished = 1;
 				}
@@ -141,4 +144,14 @@ void LineFollow_Tick(void)
 void LineFollow_Show(void)
 {
 	Serial_Printf("%f,%f,%f,%f\n",Line.Act,Line.Out,Line.Error0,Line.ErrorInt);
+}
+
+/*任务三:设置停车弯数并复位计数,发车时调用*/
+void LineFollow_SetTargetTurns(uint8_t turns)
+{
+	TargetTurns = turns;
+	Stop_Count = 0;
+	Finished = 0;
+	LostCount = 0;
+	Turn_Done = 0;
 }

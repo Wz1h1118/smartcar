@@ -761,6 +761,16 @@
               <FilePath>.\Hardware\Ultrasonic.h</FilePath>
             </File>
             <File>
+              <FileName>Task3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\Task3.c</FilePath>
+            </File>
+            <File>
+              <FileName>Task3.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\Task3.h</FilePath>
+            </File>
+            <File>
               <FileName>Encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Hardware\Encoder.c</FilePath>

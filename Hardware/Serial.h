@@ -6,6 +6,9 @@ void Serial_SendString(char *str);
 void Serial_SendArray(uint8_t* Array , uint16_t length);
 void Serial_SendNumber(uint32_t Number,uint8_t length);
 void Serial_Printf(char *format, ...);
+void Serial_Show(void);
+
+extern uint8_t VisionResult;	//1=I 3=III 5=V 7=VII 0=未识别
 #endif
 ///*用vofa调pid*/		
 //		if(RxFlag == 1)

@@ -5,15 +5,17 @@
 #include "OLED.h"
 #include "SmartCar.h"
 #include "Ultrasonic.h"
+#include "Task3.h"
 
 extern volatile uint8_t Track_Count;	//前方8路当前压线的传感器个数(LineFollow.c)
 
-/*========== 模式(PC13循环:直行→侧方→倒库→自动) ==========*/
+/*========== 模式(PC13循环:直行→侧方→倒库→自动→任务三) ==========*/
 #define MODE_LINE  0	//直行(默认)
 #define MODE_SIDE  1	//侧方
 #define MODE_BACK  2	//倒库
 #define MODE_AUTO  3	//自动:右光电+超声波距离决定
-#define MODE_COUNT  4
+#define MODE_TASK3 4	//任务三:罗马数字识别定点停车
+#define MODE_COUNT  5
 
 /*自动模式距离窗口(cm)*/
 #define AUTO_SIDE_D_MIN  18
@@ -93,6 +95,7 @@ void Parking_Init(void)
 uint8_t Parking_Running(void)
 {
 	if(ParkMode == MODE_LINE) return 0;
+	if(ParkMode == MODE_TASK3) return Task3_Running();
 	return (SideState != SIDE_IDLE) || (BackState != BACK_IDLE);
 }
 
@@ -111,15 +114,19 @@ void Parking_Scan(void)
 		ParkMode = (ParkMode + 1) % MODE_COUNT;
 		Start = 0;
 		ResetParking();
+		Task3_Reset();
 		Move_Stop();
 	}
 	else if(key == 2)
 	{
 		Start = 1;
 		ResetParking();
+		if(ParkMode == MODE_TASK3) Task3_Launch();	//任务三:发车时锁存视觉结果
 	}
 
 	if(!Start) return;	//未发车
+
+	if(ParkMode == MODE_TASK3) return;	//任务三:无触发检测,由Task3状态机接管
 
 	/*自动模式:右光电压线2ms即置标志;倒库减速期间数第二条边线*/
 	if(ParkMode == MODE_AUTO)
@@ -196,6 +203,8 @@ void Parking_Scan(void)
 void Parking_Tick(void)
 {
 	if(!Start || ParkMode == MODE_LINE) return;
+
+	if(ParkMode == MODE_TASK3) { Task3_Tick(); return; }
 
 	/*自动:标志已置,距离进窗口→启动对应停车*/
 	if(ParkMode == MODE_AUTO && AutoArmed && SideState == SIDE_IDLE && BackState == BACK_IDLE)
@@ -296,7 +305,7 @@ void Parking_Tick(void)
 
 void Parking_Show(void)
 {
-	static const char *ModeName[MODE_COUNT] = {"Line    ", "SidePark", "BackPark", "Auto    "};
+	static const char *ModeName[MODE_COUNT] = {"Line    ", "SidePark", "BackPark", "Auto    ", "Task3   "};
 	OLED_ShowString(1,1,(char *)ModeName[ParkMode]);
 	OLED_ShowString(3,1,"L");
 	OLED_ShowNum(3,2,(uint32_t)Photo3_GetLeft(),1);
