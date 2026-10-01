@@ -4,17 +4,29 @@
 #include "Photo3.h"
 #include "OLED.h"
 #include "SmartCar.h"
+#include "Ultrasonic.h"
 
 extern volatile uint8_t Track_Count;	//LineFollow.c定义:前方8路当前压线的传感器个数
 
-/*========== 停车模式(PC13按键切换) ==========*/
-#define PARK_SIDE  0	//侧方停车(开机默认)
-#define PARK_BACK  1	//倒车入库
-static volatile uint8_t ParkMode = PARK_SIDE;
+/*========== 运行模式(PC13按键循环切换:直行→侧方→倒库→自动) ==========*/
+#define MODE_LINE  0	//直行巡线(不触发停车,开机默认)
+#define MODE_SIDE  1	//侧方停车
+#define MODE_BACK  2	//倒车入库
+#define MODE_AUTO  3	//自动:右光电+超声波距离决定执行侧方还是倒库
+#define MODE_COUNT  4
+static volatile uint8_t ParkMode = MODE_LINE;
+static volatile uint8_t Start = 0;		//发车标志:0=待发车(停车等待),1=已发车(PC15)
+static volatile uint8_t AutoArmed = 0;	//自动模式标志:右光电压线后置1,超声波距离进入窗口时启动停车
+
+/*自动模式超声波距离窗口(cm):范围内才执行对应停车*/
+#define AUTO_SIDE_D_MIN  18
+#define AUTO_SIDE_D_MAX  24
+#define AUTO_BACK_D_MIN  28
+#define AUTO_BACK_D_MAX  34
 
 /*========== 侧方停车可调参数(1拍=20ms) ==========*/
 #define TRIG_LEVEL          1		//光电电平约定:白色地面=0,黑线=1,电平为1即触发
-#define SIDE_DIR_SWAP       1		//转向方向取反开关:0=触发侧即转向侧,1=取反(实测进库方向反了时切换)
+#define SIDE_DIR_SWAP       0		//方向又反了再改1
 #define SIDE_SLOW_SPEED     30		//触发后降速直行的PWM
 #define SIDE_SLOW_TICKS     5		//降速直行拍数(让车头越过触发点,留出转向空间)
 #define SIDE_TURN_SPEED     150		//入库原地转向PWM
@@ -68,6 +80,9 @@ static volatile uint8_t BackCount = 0;		//倒库:侧面检测到边线的次数
 static volatile uint8_t EdgeLatched = 0;	//倒库:本次压线是否已计过数
 static uint8_t TrigCand = 0;				//候选触发方向:1=左 2=右
 static uint8_t TrigCnt = 0;					//候选电平连续采样数(1ms采样,连续2次才确认)
+static uint8_t AutoCnt = 0;					//自动模式:右光电连续读到黑线的采样数(标志位去抖用)
+static uint8_t BackEdgeCnt = 0;				//自动倒库:减速期间第二条边线的去抖计数
+static uint8_t BackSawIdle = 0;				//自动倒库:减速期间右光电已离开线(可数下一条边线)
 
 void Parking_Init(void)
 {
@@ -77,18 +92,26 @@ void Parking_Init(void)
 
 uint8_t Parking_Running(void)
 {
-	if(ParkMode == PARK_SIDE) return (SideState != SIDE_IDLE);
-	else                      return (BackState != BACK_IDLE);
+	if(ParkMode == MODE_LINE) return 0;	//直行模式不接管电机
+	return (SideState != SIDE_IDLE) || (BackState != BACK_IDLE);	//自动模式两种流程都算接管
+}
+
+uint8_t Parking_Go(void)
+{
+	return Start;
 }
 
 /*每1ms调用:按键切换+高速采样两侧光电*/
 void Parking_Scan(void)
 {
-	/*PC13按键:侧方/倒库切换(任何时候按下都生效,切换时停车并复位)*/
+	/*PC13:循环切换模式(任何时候按下都生效,切换时停车并复位,等待重新发车)
+	  PC15:发车(复位停车状态机,车开始运行)*/
 	Key_Tick();
-	if(Key_GetNum() == 1)
+	uint8_t key = Key_GetNum();
+	if(key == 1)
 	{
-		ParkMode ^= 1;
+		ParkMode = (ParkMode + 1) % MODE_COUNT;
+		Start = 0;
 		SideState = SIDE_IDLE;
 		BackState = BACK_IDLE;
 		SideLost = 0;
@@ -96,11 +119,59 @@ void Parking_Scan(void)
 		BackTick = 0;
 		BackCount = 0;
 		EdgeLatched = 0;
-		Move_Stop();
+		Move_Stop();	//AutoArmed不清零:标志位永久锁存,只有重新上电才复位
+	}
+	else if(key == 2)
+	{
+		Start = 1;
+		SideState = SIDE_IDLE;
+		BackState = BACK_IDLE;
+		SideLost = 0;
+		Tick = 0;
+		BackTick = 0;
+		BackCount = 0;
+		EdgeLatched = 0;
 	}
 
-	if(ParkMode == PARK_SIDE && SideState != SIDE_IDLE) return;	//停车流程进行中,不再触发
-	if(ParkMode == PARK_BACK && BackState != BACK_IDLE && BackState != BACK_SLOW) return;	//减速等第二次检测期间继续采样
+	if(!Start) return;	//未发车:不做触发检测,等待PC15发车
+
+	/*自动模式单独处理:右光电压线(1ms采样连续2次确认)即置标志位
+	  不要求前方在线/武装/左光电空闲,避免其他条件挡掉锁存*/
+	if(ParkMode == MODE_AUTO)
+	{
+		if(BackState == BACK_SLOW)			/*倒库流程中:减速直行,数第二条边线(专用计数器)*/
+		{
+			if(Photo3_GetRight() != TRIG_LEVEL) { BackEdgeCnt = 0; BackSawIdle = 1; }
+			else if(BackSawIdle && ++BackEdgeCnt >= 2)
+			{
+				BackSawIdle = 0;			/*本条线已计数,离开线后重新武装*/
+				BackCount++;
+				if(BackCount >= 2)
+				{
+					BackTick = 0;
+					BackState = BACK_BACKUP;
+				}
+			}
+			return;
+		}
+
+		if(SideState != SIDE_IDLE || BackState != BACK_IDLE) return;	//其他流程进行中,不再检测
+
+		if(Photo3_GetRight() == TRIG_LEVEL)
+		{
+			if(++AutoCnt >= 2)
+			{
+				AutoArmed = 1;					//标志位永久锁存
+				SideDir = 1 ^ SIDE_DIR_SWAP;	//右方触发,方向约定与手动模式一致
+			}
+		}
+		else AutoCnt = 0;
+		return;
+	}
+
+	if(ParkMode == MODE_LINE) return;	//直行模式:不做触发检测
+	if(ParkMode == MODE_SIDE && SideState != SIDE_IDLE) return;	//停车流程进行中,不再触发
+	if(ParkMode == MODE_BACK && BackState != BACK_IDLE && BackState != BACK_SLOW) return;	//减速等第二次检测期间继续采样
 
 	uint8_t left  = Photo3_GetLeft();
 	uint8_t right = Photo3_GetRight();
@@ -128,13 +199,13 @@ void Parking_Scan(void)
 	SideDir = (dir - 1) ^ SIDE_DIR_SWAP;	//左变化=0,右变化=1,SIDE_DIR_SWAP=1时取反
 	SideArmed = 0;
 
-	if(ParkMode == PARK_SIDE)				/*侧方:第一次检测即触发*/
+	if(ParkMode == MODE_SIDE)				/*侧方:第一次检测即触发*/
 	{
 		SideLost = 0;
 		Tick = 0;
 		SideState = SIDE_SLOW;
 	}
-	else if(!EdgeLatched)					/*倒库:第一次检测减速,第二次检测启动入库*/
+	else if(!EdgeLatched)					/*MODE_BACK:第一次检测减速,第二次检测启动入库*/
 	{
 		EdgeLatched = 1;
 		BackCount++;
@@ -153,10 +224,31 @@ void Parking_Scan(void)
 
 void Parking_Tick(void)
 {
-	if(ParkMode == PARK_SIDE)
-	{
-		if(SideState == SIDE_IDLE) return;	//等待由Parking_Scan触发
+	if(!Start || ParkMode == MODE_LINE) return;	//未发车或直行:交给巡线模块(未发车时巡线也会被Go拦住)
 
+	/*自动模式第二阶段:标志位已置1,且超声波距离进入窗口→启动对应停车(两个流程都空闲时)*/
+	if(ParkMode == MODE_AUTO && AutoArmed && SideState == SIDE_IDLE && BackState == BACK_IDLE)
+	{
+		uint16_t dist = Ultrasonic_GetDistance();
+		if(dist >= AUTO_SIDE_D_MIN && dist <= AUTO_SIDE_D_MAX)		/*18~24cm:执行侧方*/
+		{
+			SideLost = 0;
+			Tick = 0;
+			SideState = SIDE_SLOW;
+		}
+		else if(dist >= AUTO_BACK_D_MIN && dist <= AUTO_BACK_D_MAX)	/*28~34cm:倒库,先减速等第二条边线*/
+		{
+			BackCount = 1;					/*锁标志的边线算第1条*/
+			BackSawIdle = 0;				/*先等右光电离开线*/
+			BackTick = 0;
+			BackState = BACK_SLOW;			/*减速直行,第二条边线由Scan数到后升级*/
+		}
+		/*标志位不清零:停车启动后仍保持1,距离不在窗口内继续等待*/
+	}
+
+	/*侧方状态机:侧方模式或自动模式触发侧方流程后执行*/
+	if(SideState != SIDE_IDLE && (ParkMode == MODE_SIDE || ParkMode == MODE_AUTO))
+	{
 		switch(SideState)
 		{
 			case SIDE_SLOW:						/*先降速直行,把车头送过触发点*/
@@ -199,10 +291,9 @@ void Parking_Tick(void)
 				break;
 		}
 	}
-	else	/*ParkMode == PARK_BACK:倒车入库*/
+	/*倒库状态机:倒库模式或自动模式触发倒库流程后执行*/
+	if(BackState != BACK_IDLE && (ParkMode == MODE_BACK || ParkMode == MODE_AUTO))
 	{
-		if(BackState == BACK_IDLE) return;	//等待由Parking_Scan触发
-
 		switch(BackState)
 		{
 			case BACK_SLOW:						/*第一次检测后减速直行,一直等第二次检测(由Parking_Scan升级状态)*/
@@ -249,13 +340,16 @@ void Parking_Tick(void)
 	}
 }
 
-/*OLED:第1行模式名,第2行当前阶段,第3行光电电平L R B+武装标志A*/
+/*OLED:第1行模式名,第2行阶段+发车状态,第3行光电电平+自动标志*/
 void Parking_Show(void)
 {
-	OLED_ShowString(1,1,ParkMode == PARK_SIDE ? "SidePark" : "BackPark");
-	OLED_ShowNum(2,1,(uint32_t)(ParkMode == PARK_SIDE ? (uint8_t)SideState : (uint8_t)BackState),2);
-	OLED_ShowNum(3,7,(uint32_t)Photo3_GetLeft(),1);
-	OLED_ShowNum(3,9,(uint32_t)Photo3_GetRight(),1);
-	OLED_ShowNum(3,11,(uint32_t)Photo3_GetBack(),1);
-	OLED_ShowChar(3,15,SideArmed ? 'A' : 'a');
+	static const char *ModeName[MODE_COUNT] = {"Line    ", "SidePark", "BackPark", "Auto    "};
+	OLED_ShowString(1,1,(char *)ModeName[ParkMode]);
+	OLED_ShowString(3,1,"L");
+	OLED_ShowNum(3,2,(uint32_t)Photo3_GetLeft(),1);
+	OLED_ShowString(3,4,"R");
+	OLED_ShowNum(3,5,(uint32_t)Photo3_GetRight(),1);
+	OLED_ShowString(3,7,"B");
+	OLED_ShowNum(3,8,(uint32_t)Photo3_GetBack(),1);
+	OLED_ShowChar(3,10,AutoArmed ? 'F' : 'f');	/*自动标志:F=右光电压过线,f=未置1*/
 }

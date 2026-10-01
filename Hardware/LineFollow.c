@@ -61,6 +61,12 @@ void LineFollow_Tick(void)
 	RightPulse = Encoder_GetRight();
 	Line.Act = Track_GetState();
 
+	if(!Parking_Go())			/*未发车:停车等待,电机不转*/
+	{
+		Move_Stop();
+		return;
+	}
+
 	if(Parking_Running()) return;	/*侧方停车执行中:电机由停车状态机接管,巡线让位*/
 
 	if(Finished)							/*已走完目标弯数,永久停车*/
@@ -134,9 +140,5 @@ void LineFollow_Tick(void)
 /*OLED第3、4行+串口:巡线调试信息*/
 void LineFollow_Show(void)
 {
-	OLED_ShowSignedNum(3,1,LostCount,5);	/*本次连续丢线周期数,便于调去抖阈值*/
-	OLED_ShowSignedNum(4,1,Stop_Count,5);
-	OLED_ShowSignedNum(4,7,Line.Act,3);		/*前方8路加权位置,-7~7*/
-	OLED_ShowSignedNum(4,10,Line.Out,3);	/*循迹PID输出的差分速度,-50~50*/
 	Serial_Printf("%f,%f,%f,%f\n",Line.Act,Line.Out,Line.Error0,Line.ErrorInt);
 }

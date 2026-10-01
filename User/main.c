@@ -22,9 +22,9 @@ int main(void)
 
 	while(1)
 	{
-		Parking_Show();			/*第1行SidePark,第2行停车阶段,第3行光电电平*/
-		LineFollow_Show();		/*第3、4行巡线调试信息+串口输出*/
-		OLED_ShowNum(4,13,Ultrasonic_GetDistance(),3);	/*超声波距离(cm)*/
+		Parking_Show();			/*第1行模式,第2行阶段+发车状态,第3行光电+标志*/
+		Ultrasonic_Show();		/*第4行超声波距离*/
+		LineFollow_Show();		/*串口调试输出*/
 	}
 }
 

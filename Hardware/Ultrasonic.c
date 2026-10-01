@@ -1,6 +1,7 @@
 #include "stm32f10x.h"                  // Device header
 #include "Ultrasonic.h"
 #include "Delay.h"
+#include "OLED.h"
 
 #define TRIG_GPIO    GPIOB
 #define TRIG_PIN     GPIO_Pin_11		//PB11 Trig,推挽输出(PB8/PB9已被OLED的I2C占用)
@@ -90,6 +91,14 @@ void Ultrasonic_Trigger(void)
 uint16_t Ultrasonic_GetDistance(void)
 {
 	return Distance;
+}
+
+/*OLED第4行显示距离: D:xxxcm*/
+void Ultrasonic_Show(void)
+{
+	OLED_ShowString(4,1,"D:");
+	OLED_ShowNum(4,3,(uint32_t)Ultrasonic_GetDistance(),3);
+	OLED_ShowString(4,7,"cm");
 }
 
 /*PB8外部中断:上升沿记起点,下降沿算距离*/

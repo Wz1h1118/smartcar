@@ -2,9 +2,9 @@
 #define __PHOTO3_H
 
 /*三路独立光电传感器通道号(只输出0/1)*/
-#define PHOTO3_LEFT   0		//PA11 左侧
-#define PHOTO3_RIGHT  1		//PA12 右侧
-#define PHOTO3_BACK   2		//PB10 后侧
+#define PHOTO3_LEFT   0		//左PA12
+#define PHOTO3_RIGHT  1		//右PA11
+#define PHOTO3_BACK   2		//后PB10
 
 void Photo3_Init(void);
 uint8_t Photo3_GetState(uint8_t channel);
