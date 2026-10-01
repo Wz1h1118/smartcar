@@ -751,6 +751,16 @@
               <FilePath>.\Hardware\LineFollow.h</FilePath>
             </File>
             <File>
+              <FileName>Ultrasonic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\Ultrasonic.c</FilePath>
+            </File>
+            <File>
+              <FileName>Ultrasonic.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\Ultrasonic.h</FilePath>
+            </File>
+            <File>
               <FileName>Encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Hardware\Encoder.c</FilePath>
