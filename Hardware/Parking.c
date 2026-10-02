@@ -6,16 +6,20 @@
 #include "SmartCar.h"
 #include "Ultrasonic.h"
 #include "Task3.h"
+#include "G1.h"
+#include "LineFollow.h"	//线数停车/巡线控制
+#include "Serial.h"		//VisionResult/GarageLoc/GarageAction
 
 extern volatile uint8_t Track_Count;	//前方8路当前压线的传感器个数(LineFollow.c)
 
-/*========== 模式(PC13循环:直行→侧方→倒库→自动→任务三) ==========*/
+/*========== 模式(PC13循环:直行→侧方→倒库→自动→任务三→发挥一) ==========*/
 #define MODE_LINE  0	//直行(默认)
 #define MODE_SIDE  1	//侧方
 #define MODE_BACK  2	//倒库
 #define MODE_AUTO  3	//自动:右光电+超声波距离决定
 #define MODE_TASK3 4	//任务三:罗马数字识别定点停车
-#define MODE_COUNT  5
+#define MODE_G1    5	//发挥一:卡片识别动态车库
+#define MODE_COUNT  6
 
 /*自动模式距离窗口(cm)*/
 #define AUTO_SIDE_D_MIN  18
@@ -92,6 +96,20 @@ void Parking_Init(void)
 	Photo3_Init();
 }
 
+/*倒库减速期间:数第二条边线,数到就进入倒退
+  useBoth=1左右任一触发都算,=0只看右光电(自动模式)*/
+static void BackSlowCount(uint8_t useBoth)
+{
+	uint8_t trig = useBoth ? ((Photo3_GetLeft() == TRIG_LEVEL) || (Photo3_GetRight() == TRIG_LEVEL))
+	                       : (Photo3_GetRight() == TRIG_LEVEL);
+	if(!trig) { BackEdgeCnt = 0; BackSawIdle = 1; }
+	else if(BackSawIdle && ++BackEdgeCnt >= 2)
+	{
+		BackSawIdle = 0;
+		if(++BackCount >= 2) { BackTick = 0; BackState = BACK_BACKUP; }
+	}
+}
+
 uint8_t Parking_Running(void)
 {
 	if(ParkMode == MODE_LINE) return 0;
@@ -106,22 +124,63 @@ uint8_t Parking_Go(void)
 
 void Parking_Scan(void)
 {
-	/*PC13切模式(停车复位) PC15发车*/
+	/*PC13:短按在Task3模式循环切换模拟停车点A→B→C→D,其他模式切模式;长按1秒切模式
+	  PC15:发车*/
 	Key_Tick();
 	uint8_t key = Key_GetNum();
-	if(key == 1)
+	uint8_t keyLong = Key_GetLong();
+	if(key == 1 && (ParkMode == MODE_TASK3 || ParkMode == MODE_G1))	//短按循环模拟视觉结果
+	{
+		/*10档循环:4个基础停车点 + 发挥一6种卡片组合*/
+		static uint8_t SimIdx = 0;
+		SimIdx = (SimIdx + 1) % 10;
+		if(SimIdx < 4)							//基础任务:PA~PD
+		{
+			static const uint8_t Num[4] = {1, 3, 5, 7};
+			VisionResult = Num[SimIdx];
+			GarageLoc = 0;
+			GarageAction = 0;
+		}
+		else									//发挥一:2色×3形=6种组合
+		{
+			/*红=倒库(REV) 黄=侧停(PAR);圆=BC 三角=CD 方=AD*/
+			static const uint8_t Loc[6] = {1, 1, 2, 2, 3, 3};	//BC BC CD CD AD AD
+			static const uint8_t Act[6] = {1, 2, 1, 2, 1, 2};	//REV PAR REV PAR REV PAR
+			GarageLoc = Loc[SimIdx - 4];
+			GarageAction = Act[SimIdx - 4];
+			VisionResult = 0;
+		}
+	}
+	else if(key == 1 || keyLong == 1)			//短按(其他模式)或长按:切换模式
 	{
 		ParkMode = (ParkMode + 1) % MODE_COUNT;
 		Start = 0;
 		ResetParking();
 		Task3_Reset();
+		G1_Reset();
+		LineFollow_SetTargetTurns(3);	//恢复默认:按弯数自动停车
 		Move_Stop();
 	}
 	else if(key == 2)
 	{
-		Start = 1;
 		ResetParking();
-		if(ParkMode == MODE_TASK3) Task3_Launch();	//任务三:发车时锁存视觉结果
+		if(ParkMode == MODE_TASK3)					//任务三:发车时锁存视觉结果
+		{
+			Start = 1;
+			Task3_Launch();
+		}
+		else if(ParkMode == MODE_G1)				//发挥一:没收到车库指令不发车
+		{
+			if(G1_Launch())
+			{
+				Start = 1;
+				LineFollow_DisableAutoStop();		//一直巡线,停车由停车流程接管
+			}
+		}
+		else
+		{
+			Start = 1;
+		}
 	}
 
 	if(!Start) return;	//未发车
@@ -131,16 +190,7 @@ void Parking_Scan(void)
 	/*自动模式:右光电压线2ms即置标志;倒库减速期间数第二条边线*/
 	if(ParkMode == MODE_AUTO)
 	{
-		if(BackState == BACK_SLOW)
-		{
-			if(Photo3_GetRight() != TRIG_LEVEL) { BackEdgeCnt = 0; BackSawIdle = 1; }
-			else if(BackSawIdle && ++BackEdgeCnt >= 2)
-			{
-				BackSawIdle = 0;
-				if(++BackCount >= 2) { BackTick = 0; BackState = BACK_BACKUP; }
-			}
-			return;
-		}
+		if(BackState == BACK_SLOW) { BackSlowCount(0); return; }
 
 		if(SideState != SIDE_IDLE || BackState != BACK_IDLE) return;
 
@@ -156,10 +206,18 @@ void Parking_Scan(void)
 		return;
 	}
 
-	/*手动模式公共触发管线*/
-	if(ParkMode == MODE_LINE) return;
-	if(ParkMode == MODE_SIDE && SideState != SIDE_IDLE) return;
-	if(ParkMode == MODE_BACK && BackState != BACK_IDLE && BackState != BACK_SLOW) return;
+	/*发挥一:数弯由G1负责,只有到达目标边后才启用下面的库边检测*/
+	if(ParkMode == MODE_G1)
+	{
+		if(BackState == BACK_SLOW) { BackSlowCount(1); return; }	//倒库减速等第二条边线
+		if(!G1_Ready() || SideState != SIDE_IDLE || BackState != BACK_IDLE) return;
+	}
+	else
+	{
+		if(ParkMode == MODE_LINE) return;
+		if(ParkMode == MODE_SIDE && SideState != SIDE_IDLE) return;
+		if(ParkMode == MODE_BACK && BackState != BACK_IDLE && BackState != BACK_SLOW) return;
+	}
 
 	uint8_t left  = Photo3_GetLeft();
 	uint8_t right = Photo3_GetRight();
@@ -192,6 +250,22 @@ void Parking_Scan(void)
 		Tick = 0;
 		SideState = SIDE_SLOW;
 	}
+	else if(ParkMode == MODE_G1)	//发挥一:按卡片识别的停车方式启动对应流程
+	{
+		if(GarageAction == 2)		//PAR:侧方
+		{
+			SideLost = 0;
+			Tick = 0;
+			SideState = SIDE_SLOW;
+		}
+		else						//REV:倒库,先减速等第二条边线
+		{
+			BackCount = 1;			//触发这条算第1条
+			BackSawIdle = 0;
+			BackTick = 0;
+			BackState = BACK_SLOW;
+		}
+	}
 	else if(!EdgeLatched)		//倒库:第1条减速,第2条入库
 	{
 		EdgeLatched = 1;
@@ -205,6 +279,8 @@ void Parking_Tick(void)
 	if(!Start || ParkMode == MODE_LINE) return;
 
 	if(ParkMode == MODE_TASK3) { Task3_Tick(); return; }
+
+	if(ParkMode == MODE_G1) G1_Tick();	//发挥一:数直角弯,到目标边后置就绪
 
 	/*自动:标志已置,距离进窗口→启动对应停车*/
 	if(ParkMode == MODE_AUTO && AutoArmed && SideState == SIDE_IDLE && BackState == BACK_IDLE)
@@ -226,7 +302,7 @@ void Parking_Tick(void)
 	}
 
 	/*侧方状态机*/
-	if(SideState != SIDE_IDLE && (ParkMode == MODE_SIDE || ParkMode == MODE_AUTO))
+	if(SideState != SIDE_IDLE && (ParkMode == MODE_SIDE || ParkMode == MODE_AUTO || ParkMode == MODE_G1))
 	{
 		switch(SideState)
 		{
@@ -263,7 +339,7 @@ void Parking_Tick(void)
 	}
 
 	/*倒库状态机*/
-	if(BackState != BACK_IDLE && (ParkMode == MODE_BACK || ParkMode == MODE_AUTO))
+	if(BackState != BACK_IDLE && (ParkMode == MODE_BACK || ParkMode == MODE_AUTO || ParkMode == MODE_G1))
 	{
 		switch(BackState)
 		{
@@ -305,7 +381,7 @@ void Parking_Tick(void)
 
 void Parking_Show(void)
 {
-	static const char *ModeName[MODE_COUNT] = {"Line    ", "SidePark", "BackPark", "Auto    ", "Task3   "};
+	static const char *ModeName[MODE_COUNT] = {"Line    ", "SidePark", "BackPark", "Auto    ", "Task3   ", "Adv1    "};
 	OLED_ShowString(1,1,(char *)ModeName[ParkMode]);
 	OLED_ShowString(3,1,"L");
 	OLED_ShowNum(3,2,(uint32_t)Photo3_GetLeft(),1);

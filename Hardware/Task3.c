@@ -7,14 +7,15 @@
 extern volatile uint8_t Track_Count;
 
 /*可调参数(1拍=20ms)*/
-#define T3_FWD_SPEED   100	//出库直行PWM
+#define T3_FWD_SPEED   200	//出库直行PWM
 #define T3_TURN_SPEED  150	//出库转弯PWM
-#define T3_TURN_TICKS  12	//转90°拍数
+#define T3_TURN_TICKS  30	//转弯最多拍数(转回线上会提前结束),转不够就加大
 #define T3_DIR_SWAP    0	//方向反了改1
 #define T3_FWD_TIMEOUT 100	//直行找线超时拍数,超时停车
 
 static volatile uint8_t T3Hold = 1;		//1=保持停车(未识别到)
 static volatile uint8_t T3Phase = 0;	//0=直行出库 1=原地转 2=交给巡线
+static volatile uint8_t T3SawLost = 0;	//转弯中已离开线(防止起转瞬间误判)
 static volatile uint16_t T3Tick = 0;
 static volatile uint8_t T3Dir = 0;		//转弯方向:0=左 1=右
 
@@ -22,6 +23,7 @@ void Task3_Reset(void)
 {
 	T3Hold = 1;
 	T3Phase = 0;
+	T3SawLost = 0;
 	T3Tick = 0;
 }
 
@@ -34,6 +36,7 @@ void Task3_Launch(void)
 		LineFollow_SetTargetTurns((r == 1 || r == 7) ? 1 : 0);	//A/D=第2个弯停 B/C=第1个弯停
 		T3Dir = ((r <= 3) ? 0 : 1) ^ T3_DIR_SWAP;				//A/B=左转 C/D=右转
 		T3Phase = 0;
+		T3SawLost = 0;
 		T3Tick = 0;
 		T3Hold = 0;
 	}
@@ -52,11 +55,13 @@ void Task3_Tick(void)
 		if(Track_Count > 0) { T3Tick = 0; T3Phase = 1; }
 		else if(++T3Tick > T3_FWD_TIMEOUT) { T3Hold = 1; }	//超时保持停
 	}
-	else if(T3Phase == 1)	//压线:原地转90°(A/B左 C/D右)
+	else if(T3Phase == 1)	//压线:原地转(A/B左 C/D右),转回线上即交给巡线
 	{
 		Move_SetSpeed(T3Dir == 0 ? -T3_TURN_SPEED : T3_TURN_SPEED,
 		              T3Dir == 0 ?  T3_TURN_SPEED : -T3_TURN_SPEED);
-		if(++T3Tick >= T3_TURN_TICKS) { T3Phase = 2; }		//转完交给巡线
+		if(Track_Count == 0) T3SawLost = 1;					//先离开线
+		if(T3SawLost && Track_Count > 0) { T3Phase = 2; }	//八路重新压线:立即交给巡线
+		else if(++T3Tick >= T3_TURN_TICKS) { T3Phase = 2; }	//兜底:转满拍数也交
 	}
 }
 
@@ -64,3 +69,4 @@ uint8_t Task3_Running(void)
 {
 	return T3Hold || (T3Phase < 2);	//未识别/直行/转弯时接管,转完交还巡线
 }
+

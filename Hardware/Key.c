@@ -2,6 +2,7 @@
 #include "Delay.h"
 
 uint8_t Key_Num;
+uint8_t Key_Long;	//长按事件:1=PC13长按 2=PC15长按(松手时不会同时产生短按)
 
 void Key_Init(void)
 {
@@ -32,6 +33,18 @@ uint8_t Key_GetNum(void)
 	return 0;
 }
 
+uint8_t Key_GetLong(void)
+{
+	uint8_t Temp;
+	if (Key_Long)
+	{
+		Temp = Key_Long;
+		Key_Long = 0;
+		return Temp;
+	}
+	return 0;
+}
+
 uint8_t Key_GetState(void)
 {
 	if (GPIO_ReadInputDataBit(GPIOC, GPIO_Pin_13) == 0)
@@ -49,18 +62,33 @@ void Key_Tick(void)
 {
 	static uint8_t Count;
 	static uint8_t CurrState, PrevState;
-	
+	static uint16_t HoldCnt;
+	static uint8_t LongSent;
+
 	Count ++;
 	if (Count >= 20)
 	{
 		Count = 0;
-		
+
 		PrevState = CurrState;
 		CurrState = Key_GetState();
-		
-		if (CurrState == 0 && PrevState != 0)
+
+		if (CurrState != 0)							//按住中
 		{
-			Key_Num = PrevState;
+			if (!LongSent && ++HoldCnt >= 50)		//50×20ms=1s:判长按
+			{
+				Key_Long = CurrState;
+				LongSent = 1;
+			}
+		}
+		else										//松手
+		{
+			if (PrevState != 0 && !LongSent)		//短按(长按过的不再重复报)
+			{
+				Key_Num = PrevState;
+			}
+			HoldCnt = 0;
+			LongSent = 0;
 		}
 	}
 }

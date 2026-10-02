@@ -14,6 +14,7 @@
 #define LOSS_DEBOUNCE 6					//丢线去抖:连续6×20ms=120ms才判定为真弯道
 
 static volatile uint8_t TargetTurns = 3;	//停车弯数:第(TargetTurns+1)个弯停,直行模式=3,任务三按字母改
+static volatile uint8_t AutoStopEn = 1;		//1=按弯数自动停车 0=不停(发挥一用)
 
 /*定速PID参数*/
 static PID_t Left_Speed_PID = {
@@ -114,7 +115,7 @@ void LineFollow_Tick(void)
 				Turn_Done = 1;
 				Stop_Count++;
 				CornerEvent = 1;			/*通知任务模块:确认了一个直角弯*/
-				if(Stop_Count > TargetTurns)	/*到目标弯数:停车*/
+				if(AutoStopEn && Stop_Count > TargetTurns)	/*到目标弯数:停车*/
 				{
 					Finished = 1;
 				}
@@ -150,8 +151,21 @@ void LineFollow_Show(void)
 void LineFollow_SetTargetTurns(uint8_t turns)
 {
 	TargetTurns = turns;
+	AutoStopEn = 1;
 	Stop_Count = 0;
 	Finished = 0;
 	LostCount = 0;
 	Turn_Done = 0;
+	CornerEvent = 0;		/*清掉上次运行残留的弯道事件,防止被任务模块误消费*/
+}
+
+/*发挥一:不按弯数自动停车,一直巡线直到停车流程接管*/
+void LineFollow_DisableAutoStop(void)
+{
+	AutoStopEn = 0;
+	Stop_Count = 0;
+	Finished = 0;
+	LostCount = 0;
+	Turn_Done = 0;
+	CornerEvent = 0;		/*同上:发车瞬间清残留,否则G1会立刻误判已到目标边*/
 }

@@ -771,6 +771,16 @@
               <FilePath>.\Hardware\Task3.h</FilePath>
             </File>
             <File>
+              <FileName>G1.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\G1.c</FilePath>
+            </File>
+            <File>
+              <FileName>G1.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\G1.h</FilePath>
+            </File>
+            <File>
               <FileName>Encoder.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Hardware\Encoder.c</FilePath>

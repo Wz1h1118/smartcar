@@ -8,7 +8,9 @@ void Serial_SendNumber(uint32_t Number,uint8_t length);
 void Serial_Printf(char *format, ...);
 void Serial_Show(void);
 
-extern uint8_t VisionResult;	//1=I 3=III 5=V 7=VII 0=未识别
+extern uint8_t VisionResult;	//基础任务:1=I 3=III 5=V 7=VII 0=未识别
+extern uint8_t GarageLoc;		//发挥一:1=BC 2=CD 3=AD 0=无
+extern uint8_t GarageAction;	//发挥一:1=REV倒库 2=PAR侧停 0=无
 #endif
 ///*用vofa调pid*/		
 //		if(RxFlag == 1)
