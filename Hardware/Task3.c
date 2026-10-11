@@ -9,7 +9,7 @@ extern volatile uint8_t Track_Count;
 /*可调参数(1拍=20ms)*/
 #define T3_FWD_SPEED   200	//出库直行PWM
 #define T3_TURN_SPEED  150	//出库转弯PWM
-#define T3_TURN_TICKS  30	//转弯最多拍数(转回线上会提前结束),转不够就加大
+#define T3_TURN_TICKS  60	//转弯最多拍数(转回线上会提前结束),转不够就加大
 #define T3_DIR_SWAP    0	//方向反了改1
 #define T3_FWD_TIMEOUT 100	//直行找线超时拍数,超时停车
 
@@ -57,8 +57,8 @@ void Task3_Tick(void)
 	}
 	else if(T3Phase == 1)	//压线:原地转(A/B左 C/D右),转回线上即交给巡线
 	{
-		Move_SetSpeed(T3Dir == 0 ? -T3_TURN_SPEED : T3_TURN_SPEED,
-		              T3Dir == 0 ?  T3_TURN_SPEED : -T3_TURN_SPEED);
+		if(T3Dir == 0) Move_SetSpeed(100, 300);	//左转:右轮快
+		else           Move_SetSpeed(300, 100);	//右转:左轮快
 		if(Track_Count == 0) T3SawLost = 1;					//先离开线
 		if(T3SawLost && Track_Count > 0) { T3Phase = 2; }	//八路重新压线:立即交给巡线
 		else if(++T3Tick >= T3_TURN_TICKS) { T3Phase = 2; }	//兜底:转满拍数也交

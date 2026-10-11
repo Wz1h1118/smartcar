@@ -12,14 +12,7 @@
 
 extern volatile uint8_t Track_Count;	//前方8路压线传感器个数(LineFollow.c)
 
-/*========== 模式(PC13循环切换) ==========*/
-#define MODE_LINE  0	//直行巡线(默认)
-#define MODE_SIDE  1	//侧方停车
-#define MODE_BACK  2	//倒车入库
-#define MODE_AUTO  3	//自动:右光电+超声波距离决定
-#define MODE_TASK3 4	//任务三:罗马数字定点停车
-#define MODE_G1    5	//发挥一:卡片识别动态车库
-#define MODE_COUNT 6
+/*模式定义见Parking.h*/
 
 /*自动模式超声波距离窗口(cm)*/
 #define AUTO_SIDE_D_MIN 18
@@ -31,10 +24,10 @@ extern volatile uint8_t Track_Count;	//前方8路压线传感器个数(LineFollo
 #define TRIG_LEVEL     1	//光电:白=0 黑=1
 #define SIDE_DIR_SWAP  0	//转向方向反了改1
 
-#define SIDE_SLOW_SPEED      30		//侧方:降速直行PWM
-#define SIDE_SLOW_TICKS      5		//降速拍数
-#define SIDE_TURN_SPEED      150	//原地转向PWM
-#define SIDE_TURN1_TICKS     12		//拐向车位拍数
+#define SIDE_SLOW_SPEED      150	//侧方:触发后先往前走一小点
+#define SIDE_SLOW_TICKS      15		//         走的拍数
+#define SIDE_TURN_SPEED      175	//原地转向PWM
+#define SIDE_TURN1_TICKS     13		//拐向车位拍数
 #define SIDE_STRAIGHT_SPEED  200	//直行找边线PWM
 #define SIDE_STRAIGHT_TIMEOUT 75	//找边线超时
 #define SIDE_TURN2_TICKS     12		//顺直拍数
@@ -123,6 +116,11 @@ uint8_t Parking_Go(void)
 	return Start;
 }
 
+uint8_t Parking_GetMode(void)
+{
+	return ParkMode;
+}
+
 void Parking_Scan(void)
 {
 	/*PC13切模式  PC15发车*/
@@ -135,6 +133,7 @@ void Parking_Scan(void)
 		ResetParking();
 		Task3_Reset();
 		G1_Reset();
+		Serial_ResetVision(ParkMode);	//给该模式一个默认识别结果
 		LineFollow_SetTargetTurns(3);	//恢复默认:按弯数自动停车
 		Move_Stop();
 	}
@@ -278,7 +277,7 @@ void Parking_Tick(void)
 	{
 		switch(SideState)
 		{
-			case SIDE_SLOW:					//降速直行,让车头越过触发点
+			case SIDE_SLOW:					//先往前走一小点,让车头越过触发点
 				Move_SetSpeed(SIDE_SLOW_SPEED, SIDE_SLOW_SPEED);
 				if(++Tick >= SIDE_SLOW_TICKS) { Tick = 0; SideState = SIDE_TURN1; }
 				break;

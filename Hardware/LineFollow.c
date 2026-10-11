@@ -8,7 +8,7 @@
 #include "Serial.h"
 #include "Parking.h"
 
-#define BASE_SPEED    60.0		//巡线基础速度(速度环目标:编码器脉冲增量/20ms)
+#define BASE_SPEED    50.0		//巡线基础速度(速度环目标:编码器脉冲增量/20ms)
 #define TURN_SPEED    300		//直角弯原地转向PWM
 #define LOST_TIMEOUT  75		//丢线超时(75×20ms≈1.5s),超时停车
 #define LOSS_DEBOUNCE 6			//丢线去抖:连续6×20ms=120ms才判为真弯道

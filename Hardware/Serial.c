@@ -2,6 +2,7 @@
 #include "stdio.h"
 #include "stdarg.h"
 #include "OLED.h"
+#include "Parking.h"	//Parking_GetMode/MODE_xxx
 
 uint8_t RxFlag;			//收满一行(以\r结尾)标志
 char RxData;			//最近收到的字节
@@ -10,6 +11,15 @@ char Str[100];			//接收缓冲
 uint8_t VisionResult = 0;	//基础任务:1=I 3=III 5=V 7=VII
 uint8_t GarageLoc = 0;		//发挥一车库位置:1=BC 2=CD 3=AD
 uint8_t GarageAction = 0;	//发挥一停车方式:1=REV倒库 2=PAR侧停
+
+/*切模式时重置识别结果:任务三给默认值(摄像头没数据时也能直接测),
+  发挥一不给默认,必须等摄像头识别出卡片*/
+void Serial_ResetVision(uint8_t mode)
+{
+	VisionResult = (mode == MODE_TASK3) ? 1 : 0;	//任务三默认 I→A点
+	GarageLoc = 0;
+	GarageAction = 0;
+}
 
 void Serial_Init(void)
 {
@@ -90,61 +100,80 @@ void USART2_IRQHandler(void)
 	}
 }
 
-/*解析并显示: Gxx,yyy=发挥一车库指令, PA~PD=基础任务停车点*/
+/*按当前模式解析并显示:
+  任务三=只认罗马数字结果(PA~PD或1/3/5/7), 发挥一=只认车库指令(Gxx,yyy),
+  其他模式不接收视觉数据*/
 void Serial_Show(void)
 {
-	static uint8_t Bad = 0;			//收到过无法识别的字符
+	uint8_t mode = Parking_GetMode();
 
+	/*在整条缓冲里搜索合法格式,容忍前面有杂散字符(半截帧残留/多余的\n等),
+	  否则一次丢字节会连累下一帧也被判废*/
 	if(RxFlag)
 	{
 		RxFlag = 0;
-		if(Str[0] == 'G')								//发挥一:如"GBC,REV"
-		{
-			if(Str[1]=='B' && Str[2]=='C')      GarageLoc = 1;
-			else if(Str[1]=='C' && Str[2]=='D') GarageLoc = 2;
-			else if(Str[1]=='A' && Str[2]=='D') GarageLoc = 3;
-			if(Str[3] == ',')
-			{
-				if(Str[4]=='R')      GarageAction = 1;	//REV=倒车入库
-				else if(Str[4]=='P') GarageAction = 2;	//PAR=侧方停车
-			}
-			Bad = 0;
-		}
-		else if(Str[0] == 'P' && Str[1] >= 'A' && Str[1] <= 'D')	//基础任务:PA~PD
+
+		if(mode == MODE_TASK3)						//任务三:只认罗马数字
 		{
 			static const uint8_t Num[4] = {1,3,5,7};
-			VisionResult = Num[Str[1] - 'A'];
-			Bad = 0;
+			for(uint8_t i = 0; Str[i] != '\0'; i++)
+			{
+				if(Str[i] == 'P' && Str[i+1] >= 'A' && Str[i+1] <= 'D')
+				{
+					VisionResult = Num[Str[i+1] - 'A'];
+					break;
+				}
+				else if(Str[i] >= '1' && Str[i] <= '7' && ((Str[i] - '0') & 1))
+				{
+					VisionResult = Str[i] - '0';	//1/3/5/7都是奇数
+					break;
+				}
+			}
 		}
-		else
+		else if(mode == MODE_G1)					//发挥一:只认车库指令
 		{
-			uint8_t ch = (uint8_t)Str[0];
-			if(ch >= '1' && ch <= '7') ch -= '0';
-			if(ch == 1 || ch == 3 || ch == 5 || ch == 7) { VisionResult = ch; Bad = 0; }
-			else Bad = 1;
+			for(uint8_t i = 0; Str[i] != '\0'; i++)
+			{
+				if(Str[i] != 'G') continue;
+				uint8_t loc = 0;
+				if(Str[i+1]=='B' && Str[i+2]=='C')      loc = 1;
+				else if(Str[i+1]=='C' && Str[i+2]=='D') loc = 2;
+				else if(Str[i+1]=='A' && Str[i+2]=='D') loc = 3;
+				if(loc == 0 || Str[i+3] != ',') continue;
+
+				GarageLoc = loc;
+				if(Str[i+4]=='R')      GarageAction = 1;	//REV=倒车入库
+				else if(Str[i+4]=='P') GarageAction = 2;	//PAR=侧方停车
+				break;
+			}
 		}
 	}
 
-	/*第2行:有车库指令优先显示,否则显示基础任务识别结果*/
-	if(GarageLoc)
+	/*第2行只在对应模式下显示:没有有效结果一律显示?*/
+	if(mode == MODE_G1)
 	{
-		static const char *Loc[4] = {"--","BC","CD","AD"};
-		static const char *Act[3] = {"---","REV","PAR"};
+		static const char *Loc[4] = {"??","BC","CD","AD"};
+		static const char *Act[3] = {"???","REV","PAR"};
 		OLED_ShowString(2,1,"G:");
 		OLED_ShowString(2,3,(char *)Loc[GarageLoc]);
 		OLED_ShowString(2,6,(char *)Act[GarageAction]);
-		return;
 	}
-
-	char pt;
-	if(VisionResult == 1) pt = 'A';
-	else if(VisionResult == 3) pt = 'B';
-	else if(VisionResult == 5) pt = 'C';
-	else if(VisionResult == 7) pt = 'D';
-	else pt = Bad ? '?' : '-';
-	OLED_ShowString(2,1,"V:");
-	OLED_ShowNum(2,3,(uint32_t)VisionResult,1);
-	OLED_ShowString(2,5,"->");
-	OLED_ShowString(2,6,"  ");
-	OLED_ShowChar(2,8,pt);
+	else if(mode == MODE_TASK3)
+	{
+		char pt;
+		if(VisionResult == 1) pt = 'A';
+		else if(VisionResult == 3) pt = 'B';
+		else if(VisionResult == 5) pt = 'C';
+		else if(VisionResult == 7) pt = 'D';
+		else pt = '?';
+		OLED_ShowString(2,1,"V:");
+		OLED_ShowNum(2,3,(uint32_t)VisionResult,1);
+		OLED_ShowString(2,5,"->");
+		OLED_ShowString(2,6,"  ");
+		OLED_ShowChar(2,8,pt);
+	}
+	else
+	{
+		OLED_ShowString(2,1,"                ");	//其他模式不显示视觉数据
+	}
 }
