@@ -37,7 +37,9 @@ extern volatile uint8_t Track_Count;	//前方8路压线传感器个数(LineFollo
 #define SIDE_TURN1_TICKS     12		//拐向车位拍数
 #define SIDE_STRAIGHT_SPEED  200	//直行找边线PWM
 #define SIDE_STRAIGHT_TIMEOUT 75	//找边线超时
-#define SIDE_TURN2_TICKS     15		//顺直拍数
+#define SIDE_TURN2_TICKS     12		//顺直拍数
+#define SIDE_BACK_SPEED      100	//停稳后八路压线时的后退PWM
+#define SIDE_BACK_TICKS      20		//后退拍数
 
 #define BACK_SLOW_SPEED    200		//倒库:减速直行PWM
 #define BACK_BACKUP_SPEED  150		//转弯前倒退PWM
@@ -45,12 +47,11 @@ extern volatile uint8_t Track_Count;	//前方8路压线传感器个数(LineFollo
 #define BACK_TURN_SPEED    100		//原地转90°PWM
 #define BACK_TURN_TICKS    50		//转90°拍数
 #define BACK_REV_SPEED     100		//倒车PWM
-#define BACK_REV_TIMEOUT   400		//找底线超时
-#define BACK_FWD_SPEED     150		//前挪PWM
-#define BACK_FWD_TICKS     20		//前挪拍数
+#define BACK_REV_TIMEOUT   400		//倒车没压到线的超时保护
+#define BACK_EXTRA_TICKS   30		//八路压线后额外再倒退的拍数
 
-typedef enum { SIDE_IDLE, SIDE_SLOW, SIDE_TURN1, SIDE_STRAIGHT, SIDE_TURN2, SIDE_DONE } SideState_t;
-typedef enum { BACK_IDLE, BACK_SLOW, BACK_BACKUP, BACK_TURN, BACK_REV, BACK_FWD, BACK_DONE } BackState_t;
+typedef enum { SIDE_IDLE, SIDE_SLOW, SIDE_TURN1, SIDE_STRAIGHT, SIDE_TURN2, SIDE_CHECK, SIDE_BACK, SIDE_DONE } SideState_t;
+typedef enum { BACK_IDLE, BACK_SLOW, BACK_BACKUP, BACK_TURN, BACK_REV, BACK_DONE } BackState_t;
 
 static volatile uint8_t ParkMode = MODE_LINE;
 static volatile uint8_t Start = 0;			//0=待发车 1=已发车(PC15)
@@ -70,6 +71,7 @@ static uint8_t TrigCnt = 0;					//触发去抖
 static uint8_t AutoCnt = 0;					//自动模式标志去抖
 static uint8_t BackEdgeCnt = 0;				//倒库第二条边线去抖
 static uint8_t BackSawIdle = 0;				//倒库:已离开线,可数下一条
+static uint8_t BackSawLine = 0;				//倒车阶段:八路已压到线(锁存)
 
 /*原地转:dir=0左转 1右转*/
 static void Turn(uint8_t dir, int16_t speed)
@@ -87,6 +89,7 @@ static void ResetParking(void)
 	BackTick = 0;
 	BackCount = 0;
 	EdgeLatched = 0;
+	BackSawLine = 0;
 }
 
 /*倒库减速期间数第二条边线:useBoth=1左右任一算,=0只看右侧(自动模式)*/
@@ -143,13 +146,11 @@ void Parking_Scan(void)
 			Start = 1;
 			Task3_Launch();
 		}
-		else if(ParkMode == MODE_G1)			//发挥一:没收到车库指令不发车
+		else if(ParkMode == MODE_G1)			//发挥一:发车即走,卡片边走边收
 		{
-			if(G1_Launch())
-			{
-				Start = 1;
-				LineFollow_DisableAutoStop();
-			}
+			G1_Launch();
+			Start = 1;
+			LineFollow_DisableAutoStop();
 		}
 		else Start = 1;
 	}
@@ -296,7 +297,18 @@ void Parking_Tick(void)
 
 			case SIDE_TURN2:				//反向原地转,车身顺直
 				Turn(SideDir ^ 1, SIDE_TURN_SPEED);
-				if(++Tick >= SIDE_TURN2_TICKS) { Tick = 0; SideState = SIDE_DONE; }
+				if(++Tick >= SIDE_TURN2_TICKS) { Tick = 0; SideState = SIDE_CHECK; }
+				break;
+
+			case SIDE_CHECK:				//停稳后检查:八路压线说明停得太靠前
+				Move_Stop();
+				if(Track_Count > 0) { Tick = 0; SideState = SIDE_BACK; }	//压线:往后退一点
+				else SideState = SIDE_DONE;
+				break;
+
+			case SIDE_BACK:					//后退,让车身退出黑线
+				Move_SetSpeed(-SIDE_BACK_SPEED, -SIDE_BACK_SPEED);
+				if(++Tick >= SIDE_BACK_TICKS) { Tick = 0; SideState = SIDE_DONE; }
 				break;
 
 			case SIDE_DONE:
@@ -325,18 +337,21 @@ void Parking_Tick(void)
 
 			case BACK_TURN:					//往车库反方向原地转90°
 				Turn(SideDir ^ 1, BACK_TURN_SPEED);
-				if(++BackTick >= BACK_TURN_TICKS) { BackTick = 0; BackState = BACK_REV; }
+				if(++BackTick >= BACK_TURN_TICKS) { BackTick = 0; BackSawLine = 0; BackState = BACK_REV; }
 				break;
 
-			case BACK_REV:					//倒车,等后方光电检测到底线
+			case BACK_REV:					//倒车:八路压线后再多倒一段
 				Move_SetSpeed(-BACK_REV_SPEED, -BACK_REV_SPEED);
-				if(Photo3_GetBack() == TRIG_LEVEL) { BackTick = 0; BackState = BACK_FWD; }
-				else if(++BackTick > BACK_REV_TIMEOUT) { BackState = BACK_DONE; }
-				break;
-
-			case BACK_FWD:					//到底线后往前挪一点
-				Move_SetSpeed(BACK_FWD_SPEED, BACK_FWD_SPEED);
-				if(++BackTick >= BACK_FWD_TICKS) { BackTick = 0; BackState = BACK_DONE; }
+				if(Track_Count > 0 && !BackSawLine)						//刚压到线:重新计时
+				{
+					BackSawLine = 1;
+					BackTick = 0;
+				}
+				if(BackSawLine)
+				{
+					if(++BackTick >= BACK_EXTRA_TICKS) BackState = BACK_DONE;	//再倒退一段后停
+				}
+				else if(++BackTick > BACK_REV_TIMEOUT) BackState = BACK_DONE;	//一直没压到线:超时保护
 				break;
 
 			case BACK_DONE:
@@ -359,7 +374,5 @@ void Parking_Show(void)
 	OLED_ShowNum(3,2,(uint32_t)Photo3_GetLeft(),1);
 	OLED_ShowString(3,4,"R");
 	OLED_ShowNum(3,5,(uint32_t)Photo3_GetRight(),1);
-	OLED_ShowString(3,7,"B");
-	OLED_ShowNum(3,8,(uint32_t)Photo3_GetBack(),1);
-	OLED_ShowChar(3,10,AutoArmed ? 'F' : 'f');
+	OLED_ShowChar(3,7,AutoArmed ? 'F' : 'f');
 }
