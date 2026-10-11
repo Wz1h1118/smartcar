@@ -4,7 +4,7 @@
 const int8_t Weight[8] = {-7,-5,-3,-1,1,3,5,7};
 volatile int8_t Location[8];
 float Weight_Sum;
-extern uint8_t Track_Count;
+extern volatile uint8_t Track_Count;	//定义在LineFollow.c,中断里读写
 
 void Track_Init(void)
 {

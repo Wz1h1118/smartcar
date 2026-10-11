@@ -93,9 +93,3 @@ void Motor_SetRightPWM(int16_t pwm)
 	}
 	TIM_SetCompare2(TIM4,pwm);
 }
-
-void Motor_SetPWM(int16_t left,int16_t right)
-{
-	Motor_SetLeftPWM(left);
-	Motor_SetRightPWM(right);
-}

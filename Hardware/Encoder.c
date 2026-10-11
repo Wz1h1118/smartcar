@@ -1,7 +1,6 @@
 #include "Encoder.h"
 
-/*方向校准开关:实测发现顺时针转动读数不是增大而是减小时,把对应值从0改成1即可翻转,
-  不需要重新接线。装车后先测试这个再决定要不要改。*/
+/*方向校准开关:实测顺时针转动读数不增反减时,把对应值从0改成1翻转,不用重新接线*/
 #define LEFT_ENCODER_INVERT   0
 #define RIGHT_ENCODER_INVERT  0
 
@@ -29,9 +28,7 @@ void Encoder_Init(void)
     TIM_TimeBaseInit(TIM2, &TIM_TimeBaseStructure);
     TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
 
-    /*顺时针增大、逆时针减小这个方向约定,实际由编码器AB两相接线顺序和这里的
-      TIM_EncoderMode配置共同决定,具体哪个方向对应正数需要装车后实测确认,
-      测完不对就改上面LEFT_ENCODER_INVERT/RIGHT_ENCODER_INVERT这两个开关*/
+    /*TI12:AB两相都计数;顺时针读数为正还是反之由接线顺序决定,实测不对就改上面的开关*/
     TIM_EncoderInterfaceConfig(TIM2, TIM_EncoderMode_TI12, TIM_ICPolarity_Rising, TIM_ICPolarity_Rising);
     TIM_EncoderInterfaceConfig(TIM3, TIM_EncoderMode_TI12, TIM_ICPolarity_Rising, TIM_ICPolarity_Rising);
 

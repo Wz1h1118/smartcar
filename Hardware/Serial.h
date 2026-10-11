@@ -1,42 +1,14 @@
 #ifndef __SERIAL_H
 #define __SERIAL_H
+
+/*视觉模块串口:USART2,PA2=TX PA3=RX,9600*/
+
 void Serial_Init(void);
-void Serial_SendByte(uint8_t Byte);
-void Serial_SendString(char *str);
-void Serial_SendArray(uint8_t* Array , uint16_t length);
-void Serial_SendNumber(uint32_t Number,uint8_t length);
 void Serial_Printf(char *format, ...);
 void Serial_Show(void);
 
-extern uint8_t VisionResult;	//基础任务:1=I 3=III 5=V 7=VII 0=未识别
-extern uint8_t GarageLoc;		//发挥一:1=BC 2=CD 3=AD 0=无
-extern uint8_t GarageAction;	//发挥一:1=REV倒库 2=PAR侧停 0=无
+extern uint8_t VisionResult;	//基础任务:1=I 3=III 5=V 7=VII
+extern uint8_t GarageLoc;		//发挥一:1=BC 2=CD 3=AD
+extern uint8_t GarageAction;	//发挥一:1=REV倒库 2=PAR侧停
+
 #endif
-///*用vofa调pid*/		
-//		if(RxFlag == 1)
-//				{
-//					const char *StrFlag = strtok(Str,":");
-//					const char *StrNum = strtok(NULL,":");
-//					if(StrFlag != NULL && StrNum != NULL)
-//					{
-//						float num = atof(StrNum);		
-//						if(strcmp(StrFlag,"Kp") == 0)
-//						{
-//							Right_Speed_PID.Kp = num;
-//						}
-//						else if(strcmp(StrFlag,"Ki") == 0)
-//						{
-//							Right_Speed_PID.Ki = num;
-//						}
-//						else if(strcmp(StrFlag,"Kd") == 0)
-//						{
-//							Right_Speed_PID.Kd = num;
-//						}
-//						else if(strcmp(StrFlag,"Speed") == 0)
-//						{
-//							Right_Speed_PID.Tar = num;
-//						}
-//					}			
-//					RxFlag = 0;
-//			}
-//				Serial_Printf("%f,%f,%f,%f\n",Right_Speed_PID.Act,Right_Speed_PID.Tar,Right_Speed_PID.Out,Right_Speed_PID.Tar);;

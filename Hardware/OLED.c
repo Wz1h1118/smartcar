@@ -1,11 +1,10 @@
 #include "stm32f10x.h"
 #include "OLED_Font.h"
 
-/*引脚配置*/
+/*软件I2C引脚:PB8=SCL PB9=SDA*/
 #define OLED_W_SCL(x)		GPIO_WriteBit(GPIOB, GPIO_Pin_8, (BitAction)(x))
 #define OLED_W_SDA(x)		GPIO_WriteBit(GPIOB, GPIO_Pin_9, (BitAction)(x))
 
-/*引脚初始化*/
 void OLED_I2C_Init(void)
 {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
@@ -22,11 +21,7 @@ void OLED_I2C_Init(void)
 	OLED_W_SDA(1);
 }
 
-/**
-  * @brief  I2C开始
-  * @param  无
-  * @retval 无
-  */
+/*起始条件:SCL高电平期间SDA拉低*/
 void OLED_I2C_Start(void)
 {
 	OLED_W_SDA(1);
@@ -35,11 +30,7 @@ void OLED_I2C_Start(void)
 	OLED_W_SCL(0);
 }
 
-/**
-  * @brief  I2C停止
-  * @param  无
-  * @retval 无
-  */
+/*停止条件:SCL高电平期间SDA拉高*/
 void OLED_I2C_Stop(void)
 {
 	OLED_W_SDA(0);
@@ -47,11 +38,7 @@ void OLED_I2C_Stop(void)
 	OLED_W_SDA(1);
 }
 
-/**
-  * @brief  I2C发送一个字节
-  * @param  Byte 要发送的一个字节
-  * @retval 无
-  */
+/*I2C发送1字节,MSB先行*/
 void OLED_I2C_SendByte(uint8_t Byte)
 {
 	uint8_t i;
@@ -65,11 +52,6 @@ void OLED_I2C_SendByte(uint8_t Byte)
 	OLED_W_SCL(0);
 }
 
-/**
-  * @brief  OLED写命令
-  * @param  Command 要写入的命令
-  * @retval 无
-  */
 void OLED_WriteCommand(uint8_t Command)
 {
 	OLED_I2C_Start();
@@ -79,11 +61,6 @@ void OLED_WriteCommand(uint8_t Command)
 	OLED_I2C_Stop();
 }
 
-/**
-  * @brief  OLED写数据
-  * @param  Data 要写入的数据
-  * @retval 无
-  */
 void OLED_WriteData(uint8_t Data)
 {
 	OLED_I2C_Start();
@@ -93,12 +70,7 @@ void OLED_WriteData(uint8_t Data)
 	OLED_I2C_Stop();
 }
 
-/**
-  * @brief  OLED设置光标位置
-  * @param  Y 以左上角为原点，向下方向的坐标，范围：0~7
-  * @param  X 以左上角为原点，向右方向的坐标，范围：0~127
-  * @retval 无
-  */
+/*设置光标:Y=页(0~7),X=列(0~127),左上角为原点*/
 void OLED_SetCursor(uint8_t Y, uint8_t X)
 {
 	OLED_WriteCommand(0xB0 | Y);					//设置Y位置
@@ -106,11 +78,6 @@ void OLED_SetCursor(uint8_t Y, uint8_t X)
 	OLED_WriteCommand(0x00 | (X & 0x0F));			//设置X位置低4位
 }
 
-/**
-  * @brief  OLED清屏
-  * @param  无
-  * @retval 无
-  */
 void OLED_Clear(void)
 {  
 	uint8_t i, j;
@@ -124,13 +91,7 @@ void OLED_Clear(void)
 	}
 }
 
-/**
-  * @brief  OLED显示一个字符
-  * @param  Line 行位置，范围：1~4
-  * @param  Column 列位置，范围：1~16
-  * @param  Char 要显示的一个字符，范围：ASCII可见字符
-  * @retval 无
-  */
+/*显示1个字符:Line 1~4,Column 1~16,ASCII可见字符*/
 void OLED_ShowChar(uint8_t Line, uint8_t Column, char Char)
 {      	
 	uint8_t i;
@@ -146,13 +107,7 @@ void OLED_ShowChar(uint8_t Line, uint8_t Column, char Char)
 	}
 }
 
-/**
-  * @brief  OLED显示字符串
-  * @param  Line 起始行位置，范围：1~4
-  * @param  Column 起始列位置，范围：1~16
-  * @param  String 要显示的字符串，范围：ASCII可见字符
-  * @retval 无
-  */
+/*显示字符串:Line 1~4,Column 1~16,ASCII可见字符*/
 void OLED_ShowString(uint8_t Line, uint8_t Column, char *String)
 {
 	uint8_t i;
@@ -162,10 +117,7 @@ void OLED_ShowString(uint8_t Line, uint8_t Column, char *String)
 	}
 }
 
-/**
-  * @brief  OLED次方函数
-  * @retval 返回值等于X的Y次方
-  */
+/*返回X的Y次方*/
 uint32_t OLED_Pow(uint32_t X, uint32_t Y)
 {
 	uint32_t Result = 1;
@@ -176,14 +128,7 @@ uint32_t OLED_Pow(uint32_t X, uint32_t Y)
 	return Result;
 }
 
-/**
-  * @brief  OLED显示数字（十进制，正数）
-  * @param  Line 起始行位置，范围：1~4
-  * @param  Column 起始列位置，范围：1~16
-  * @param  Number 要显示的数字，范围：0~4294967295
-  * @param  Length 要显示数字的长度，范围：1~10
-  * @retval 无
-  */
+/*显示十进制无符号数:固定Length位(前导补0)*/
 void OLED_ShowNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Length)
 {
 	uint8_t i;
@@ -193,14 +138,7 @@ void OLED_ShowNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Length)
 	}
 }
 
-/**
-  * @brief  OLED显示数字（十进制，带符号数）
-  * @param  Line 起始行位置，范围：1~4
-  * @param  Column 起始列位置，范围：1~16
-  * @param  Number 要显示的数字，范围：-2147483648~2147483647
-  * @param  Length 要显示数字的长度，范围：1~10
-  * @retval 无
-  */
+/*显示十进制带符号数:第1列是+/-,正数也显示+,共占用Length+1列*/
 void OLED_ShowSignedNum(uint8_t Line, uint8_t Column, int32_t Number, uint8_t Length)
 {
 	uint8_t i;
@@ -221,14 +159,7 @@ void OLED_ShowSignedNum(uint8_t Line, uint8_t Column, int32_t Number, uint8_t Le
 	}
 }
 
-/**
-  * @brief  OLED显示数字（十六进制，正数）
-  * @param  Line 起始行位置，范围：1~4
-  * @param  Column 起始列位置，范围：1~16
-  * @param  Number 要显示的数字，范围：0~0xFFFFFFFF
-  * @param  Length 要显示数字的长度，范围：1~8
-  * @retval 无
-  */
+/*显示十六进制(大写):固定Length位(前导补0)*/
 void OLED_ShowHexNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Length)
 {
 	uint8_t i, SingleNumber;
@@ -246,14 +177,7 @@ void OLED_ShowHexNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Leng
 	}
 }
 
-/**
-  * @brief  OLED显示数字（二进制，正数）
-  * @param  Line 起始行位置，范围：1~4
-  * @param  Column 起始列位置，范围：1~16
-  * @param  Number 要显示的数字，范围：0~1111 1111 1111 1111
-  * @param  Length 要显示数字的长度，范围：1~16
-  * @retval 无
-  */
+/*显示二进制:固定Length位(前导补0),Length最大16*/
 void OLED_ShowBinNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Length)
 {
 	uint8_t i;
@@ -263,11 +187,6 @@ void OLED_ShowBinNum(uint8_t Line, uint8_t Column, uint32_t Number, uint8_t Leng
 	}
 }
 
-/**
-  * @brief  OLED初始化
-  * @param  无
-  * @retval 无
-  */
 void OLED_Init(void)
 {
 	uint32_t i, j;
